@@ -465,4 +465,11 @@ AND gc_grace_seconds = 3600;
 -- +migrate Down
 DROP TABLE IF EXISTS keyspace.users;
 DROP TYPE IF EXISTS keyspace.address;`,
+	`-- +migrate Up
+CREATE TABLE bucket_test (
+  bucket text,
+  due_at timestamp,
+  event_id uuid,
+  PRIMARY KEY ((bucket), due_at, event_id)
+) WITH CLUSTERING ORDER BY (due_at ASC);`,
 }
