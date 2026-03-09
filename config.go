@@ -1,4 +1,4 @@
-package main
+package migrate
 
 import (
 	"errors"
@@ -7,31 +7,24 @@ import (
 	"strings"
 )
 
-var (
-	ConfigFile        string
-	ConfigEnvironment string
-	IgnoreExistErrors bool
-)
-
 const (
-	DefaultConfigFile          = "cassandraconfig.yaml"
-	DefaultConfigEnvironment   = "development"
-	DefaultConfigPort          = "9042"
-	DefaultConfigUsername      = "cassandra"
-	DefaultConfigPassword      = "cassandra"
-	DefaultConfigMigrationDir  = "migrations"
-	DefaultReplicationFactor   = "1"
-	DefaultReplicationStrategy = "SimpleStrategy"
+	DefaultConfigFile         = "cassandraconfig.yaml"
+	DefaultConfigEnvironment  = "development"
+	DefaultConfigPort         = "9042"
+	DefaultConfigUsername     = "cassandra"
+	DefaultConfigPassword     = "cassandra"
+	DefaultConfigMigrationDir = "migrations"
 )
 
+// Config represents validated runtime migration settings for one environment.
 type Config struct {
-	Keyspace          string      `yaml:"keyspace"`
-	MigrationDir      string      `yaml:"migration_dir"`
-	Connection        Connection  `yaml:"connection"`
-	Replication       Replication `yaml:"replication"`
-	IgnoreExistErrors bool        `yaml:"-"`
+	Keyspace          string     `yaml:"keyspace"`
+	MigrationDir      string     `yaml:"migration_dir"`
+	Connection        Connection `yaml:"connection"`
+	IgnoreExistErrors bool       `yaml:"-"`
 }
 
+// Connection describes Cassandra connectivity settings.
 type Connection struct {
 	Hosts    []string `yaml:"hosts"`
 	Port     string   `yaml:"port"`
@@ -39,13 +32,25 @@ type Connection struct {
 	Password string   `yaml:"password"`
 }
 
-type Replication struct {
-	Factor   string `yaml:"factor"`
-	Strategy string `yaml:"strategy"`
+// Options represents loader options for retrieving a Config from YAML.
+type Options struct {
+	ConfigFile        string
+	Environment       string
+	IgnoreExistErrors bool
 }
 
-func ReadConfig() (map[string]Config, error) {
-	file, err := os.ReadFile(ConfigFile)
+// DefaultOptions returns default config loader values.
+func DefaultOptions() Options {
+	return Options{
+		ConfigFile:        DefaultConfigFile,
+		Environment:       DefaultConfigEnvironment,
+		IgnoreExistErrors: false,
+	}
+}
+
+// ReadConfigFile reads and unmarshals the full environment map from a config file.
+func ReadConfigFile(configFile string) (map[string]Config, error) {
+	file, err := os.ReadFile(configFile)
 	if err != nil {
 		return nil, err
 	}
@@ -59,15 +64,22 @@ func ReadConfig() (map[string]Config, error) {
 	return config, nil
 }
 
+// GetConfig loads configuration using default options.
 func GetConfig() (Config, error) {
-	config, err := ReadConfig()
+	opts := DefaultOptions()
+	return GetConfigFrom(opts.ConfigFile, opts.Environment, opts.IgnoreExistErrors)
+}
+
+// GetConfigFrom loads and validates one environment from the config file.
+func GetConfigFrom(configFile, configEnvironment string, ignoreExistErrors bool) (Config, error) {
+	config, err := ReadConfigFile(configFile)
 	if err != nil {
 		return Config{}, err
 	}
 
-	conf, ok := config[ConfigEnvironment]
+	conf, ok := config[configEnvironment]
 	if !ok {
-		return Config{}, errors.New("no environment: " + ConfigEnvironment)
+		return Config{}, errors.New("no environment: " + configEnvironment)
 	}
 	nonEmptyHosts := make([]string, 0)
 	for _, host := range conf.Connection.Hosts {
@@ -103,15 +115,7 @@ func GetConfig() (Config, error) {
 	if conf.MigrationDir == "" {
 		conf.MigrationDir = DefaultConfigMigrationDir
 	}
-	conf.Replication.Factor = os.ExpandEnv(conf.Replication.Factor)
-	if conf.Replication.Factor == "" {
-		conf.Replication.Factor = DefaultReplicationFactor
-	}
-	conf.Replication.Strategy = os.ExpandEnv(conf.Replication.Strategy)
-	if conf.Replication.Strategy == "" {
-		conf.Replication.Strategy = DefaultReplicationStrategy
-	}
-	conf.IgnoreExistErrors = IgnoreExistErrors
+	conf.IgnoreExistErrors = ignoreExistErrors
 
 	return conf, nil
 }
