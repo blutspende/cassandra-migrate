@@ -9,16 +9,12 @@ import (
 )
 
 const (
-	sqlCmdPrefix        = "-- +migrate "
-	optionNoTransaction = "notransaction"
+	sqlCmdPrefix = "-- +migrate "
 )
 
 type ParsedMigration struct {
 	UpStatements   []string
 	DownStatements []string
-
-	DisableTransactionUp   bool
-	DisableTransactionDown bool
 }
 
 // LineSeparator can be used to split migrations by an exact line match. This line
@@ -30,12 +26,12 @@ var LineSeparator = ""
 
 func errNoTerminator() error {
 	if len(LineSeparator) == 0 {
-		return fmt.Errorf(`ERROR: The last statement must be ended by a semicolon or '-- +migrate StatementEnd' marker.
-			See https://github.com/rubenv/sql-migrate for details.`)
+		return fmt.Errorf(`ERROR: The last statement must be ended by a semicolon.
+			See https://github.com/blutspende/cassandra-migrate for details.`)
 	}
 
-	return fmt.Errorf(`ERROR: The last statement must be ended by a semicolon, a line whose contents are %q, or '-- +migrate StatementEnd' marker.
-			See https://github.com/rubenv/sql-migrate for details.`, LineSeparator)
+	return fmt.Errorf(`ERROR: The last statement must be ended by a semicolon or a line whose contents are %q.
+			See https://github.com/blutspende/cassandra-migrate for details.`, LineSeparator)
 }
 
 // Checks the line to see if the line has a statement-ending semicolon
@@ -66,24 +62,13 @@ const (
 
 type migrateCommand struct {
 	Command string
-	Options []string
-}
-
-func (c *migrateCommand) HasOption(opt string) bool {
-	for _, specifiedOption := range c.Options {
-		if specifiedOption == opt {
-			return true
-		}
-	}
-
-	return false
 }
 
 func parseCommand(line string) (*migrateCommand, error) {
 	cmd := &migrateCommand{}
 
 	if !strings.HasPrefix(line, sqlCmdPrefix) {
-		return nil, fmt.Errorf("ERROR: not a sql-migrate command")
+		return nil, fmt.Errorf("ERROR: not a migration command")
 	}
 
 	fields := strings.Fields(line[len(sqlCmdPrefix):])
@@ -93,8 +78,6 @@ func parseCommand(line string) (*migrateCommand, error) {
 
 	cmd.Command = fields[0]
 
-	cmd.Options = fields[1:]
-
 	return cmd, nil
 }
 
@@ -102,11 +85,6 @@ func parseCommand(line string) (*migrateCommand, error) {
 //
 // The base case is to simply split on semicolons, as these
 // naturally terminate a statement.
-//
-// However, more complex cases like pl/pgsql can have semicolons
-// within a statement. For these cases, we provide the explicit annotations
-// 'StatementBegin' and 'StatementEnd' to allow the script to
-// tell us to ignore semicolons.
 func ParseMigration(r io.ReadSeeker) (*ParsedMigration, error) {
 	p := &ParsedMigration{}
 
@@ -119,8 +97,6 @@ func ParseMigration(r io.ReadSeeker) (*ParsedMigration, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	statementEnded := false
-	ignoreSemicolons := false
 	currentDirection := directionNone
 
 	for scanner.Scan() {
@@ -144,49 +120,35 @@ func ParseMigration(r io.ReadSeeker) (*ParsedMigration, error) {
 					return nil, errNoTerminator()
 				}
 				currentDirection = directionUp
-				if cmd.HasOption(optionNoTransaction) {
-					p.DisableTransactionUp = true
-				}
 
 			case "Down":
 				if len(strings.TrimSpace(buf.String())) > 0 {
 					return nil, errNoTerminator()
 				}
 				currentDirection = directionDown
-				if cmd.HasOption(optionNoTransaction) {
-					p.DisableTransactionDown = true
-				}
 
-			case "StatementBegin":
-				if currentDirection != directionNone {
-					ignoreSemicolons = true
-				}
-
-			case "StatementEnd":
-				if currentDirection != directionNone {
-					statementEnded = ignoreSemicolons
-					ignoreSemicolons = false
-				}
+			default:
+				return nil, fmt.Errorf(`ERROR: unsupported migration command %q.
+			Only '-- +migrate Up' and '-- +migrate Down' are supported.
+			See https://github.com/blutspende/cassandra-migrate for details.`, cmd.Command)
 			}
+
+			continue
 		}
 
 		if currentDirection == directionNone {
 			continue
 		}
 
-		isLineSeparator := !ignoreSemicolons && len(LineSeparator) > 0 && line == LineSeparator
+		isLineSeparator := len(LineSeparator) > 0 && line == LineSeparator
 
-		if !isLineSeparator && !strings.HasPrefix(line, "-- +") {
+		if !isLineSeparator {
 			if _, err := buf.WriteString(line + "\n"); err != nil {
 				return nil, err
 			}
 		}
 
-		// Wrap up the two supported cases: 1) basic with semicolon; 2) psql statement
-		// Lines that end with semicolon that are in a statement block
-		// do not conclude statement.
-		if (!ignoreSemicolons && (endsWithSemicolon(line) || isLineSeparator)) || statementEnded {
-			statementEnded = false
+		if endsWithSemicolon(line) || isLineSeparator {
 			switch currentDirection {
 			case directionUp:
 				p.UpStatements = append(p.UpStatements, buf.String())
@@ -206,14 +168,9 @@ func ParseMigration(r io.ReadSeeker) (*ParsedMigration, error) {
 		return nil, err
 	}
 
-	// diagnose likely migration script errors
-	if ignoreSemicolons {
-		return nil, fmt.Errorf("ERROR: saw '-- +migrate StatementBegin' with no matching '-- +migrate StatementEnd'")
-	}
-
 	if currentDirection == directionNone {
 		return nil, fmt.Errorf(`ERROR: no Up/Down annotations found, so no statements were executed.
-			See https://github.com/rubenv/sql-migrate for details.`)
+			See https://github.com/blutspende/cassandra-migrate for details.`)
 	}
 
 	// allow comment without sql instruction. Example:

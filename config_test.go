@@ -93,7 +93,7 @@ func TestGetConfig_DefaultOptionsFileMissing(t *testing.T) {
 		_ = os.Chdir(wd)
 	})
 
-	_, err = GetConfig()
+	_, err = GetDefaultConfig()
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, os.ErrNotExist))
 }

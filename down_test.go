@@ -28,10 +28,10 @@ func TestIsNewerMigration_PrefersLaterAppliedAt(t *testing.T) {
 func TestLatestMigrationOrdering_SortsTiedTimestampsByDescendingID(t *testing.T) {
 	appliedAt := time.Date(2026, time.March, 9, 10, 30, 0, 0, time.UTC)
 	migrations := []Migration{
-		{ID: "20260309103000-add-index.cql", AppliedAt: appliedAt},
-		{ID: "20260309103001-create-users.cql", AppliedAt: appliedAt},
-		{ID: "20260309102959-create-table.cql", AppliedAt: appliedAt},
-		{ID: "20260309110000-add-column.cql", AppliedAt: appliedAt.Add(-time.Minute)},
+		{ID: "20260309110000-add-column.cql", AppliedAt: appliedAt.Add(-time.Minute)}, // Older timestamp
+		{ID: "20260309102959-create-table.cql", AppliedAt: appliedAt},                 // Same timestamp, lowest ID
+		{ID: "20260309103000-add-index.cql", AppliedAt: appliedAt},                    // Same timestamp, middle ID
+		{ID: "20260309103001-create-users.cql", AppliedAt: appliedAt},                 // Same timestamp, highest ID
 	}
 
 	sort.Slice(migrations, func(i, j int) bool {
@@ -39,6 +39,9 @@ func TestLatestMigrationOrdering_SortsTiedTimestampsByDescendingID(t *testing.T)
 	})
 
 	assert.Equal(t, "20260309103001-create-users.cql", migrations[0].ID)
+	assert.Equal(t, "20260309103000-add-index.cql", migrations[1].ID)
+	assert.Equal(t, "20260309102959-create-table.cql", migrations[2].ID)
+	assert.Equal(t, "20260309110000-add-column.cql", migrations[3].ID)
 }
 
 func TestApplyDown_InvalidGlobPattern(t *testing.T) {

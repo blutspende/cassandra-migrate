@@ -64,8 +64,8 @@ func ReadConfigFile(configFile string) (map[string]Config, error) {
 	return config, nil
 }
 
-// GetConfig loads configuration using default options.
-func GetConfig() (Config, error) {
+// GetDefaultConfig loads configuration using default options.
+func GetDefaultConfig() (Config, error) {
 	opts := DefaultOptions()
 	return GetConfigFrom(opts.ConfigFile, opts.Environment, opts.IgnoreExistErrors)
 }

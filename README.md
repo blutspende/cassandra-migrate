@@ -169,10 +169,6 @@ Supported directives:
 
 - `-- +migrate Up`
 - `-- +migrate Down`
-- `-- +migrate StatementBegin`
-- `-- +migrate StatementEnd`
-
-Statements must end with `;` unless wrapped in `StatementBegin` / `StatementEnd`.
 
 ## Runtime Behavior
 
