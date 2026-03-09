@@ -3,9 +3,10 @@ package migrate
 import (
 	"errors"
 	"fmt"
-	"github.com/gocql/gocql"
 	"reflect"
 	"time"
+
+	"github.com/gocql/gocql"
 )
 
 // GetConnection creates a Cassandra session using password authentication.
@@ -38,6 +39,14 @@ func IsExistError(err error) bool {
 type Migration struct {
 	ID        string
 	AppliedAt time.Time
+}
+
+// IsNewerMigration orders applied migrations by timestamp descending, then ID descending.
+func IsNewerMigration(left, right Migration) bool {
+	if left.AppliedAt.Equal(right.AppliedAt) {
+		return left.ID > right.ID
+	}
+	return left.AppliedAt.After(right.AppliedAt)
 }
 
 // GetExistingMigrations returns all applied migrations for a keyspace.

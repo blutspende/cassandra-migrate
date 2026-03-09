@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"github.com/blutspende/cassandra-migrate/sqlparse"
 	"github.com/gocql/gocql"
@@ -33,7 +34,7 @@ func ApplyDown(conf Config) (DownResult, error) {
 	}
 	defer session.Close()
 	id, err := GetLatestMigrationID(conf.Keyspace, session)
-	if err == gocql.ErrNotFound {
+	if errors.Is(err, gocql.ErrNotFound) {
 		return DownResult{Applied: false}, nil
 	}
 	if err != nil {
@@ -74,7 +75,8 @@ func ApplyDown(conf Config) (DownResult, error) {
 	return DownResult{Applied: true, MigrationID: id}, nil
 }
 
-// GetLatestMigrationID returns the newest applied migration ID by applied_at.
+// GetLatestMigrationID returns the newest applied migration ID by applied_at,
+// breaking ties by descending alphabetical ID order.
 func GetLatestMigrationID(keyspace string, session *gocql.Session) (string, error) {
 	migrations, err := GetExistingMigrations(keyspace, session)
 	if err != nil {
@@ -84,7 +86,7 @@ func GetLatestMigrationID(keyspace string, session *gocql.Session) (string, erro
 		return "", gocql.ErrNotFound
 	}
 	sort.Slice(migrations, func(i, j int) bool {
-		return migrations[i].AppliedAt.After(migrations[j].AppliedAt)
+		return IsNewerMigration(migrations[i], migrations[j])
 	})
 
 	return migrations[0].ID, nil
