@@ -1,0 +1,9 @@
+This directory contains code derived from:
+
+sql-migrate
+https://github.com/rubenv/sql-migrate
+
+Copyright (C) 2014-2017 Ruben Vermeersch
+Copyright (C) 2012-2014 Liam Staskawicz
+
+Licensed under the MIT License.

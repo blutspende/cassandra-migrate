@@ -1,40 +1,15 @@
-package main
+package migrate
 
 import (
 	"errors"
 	"fmt"
-	"github.com/gocql/gocql"
-	"github.com/urfave/cli/v2"
 	"reflect"
-	"strings"
 	"time"
+
+	"github.com/gocql/gocql"
 )
 
-var CommonFlags = []cli.Flag{
-	&cli.StringFlag{
-		Name:        "config",
-		Usage:       fmt.Sprintf("name of the config file (default: %s)", DefaultConfigFile),
-		Required:    false,
-		Value:       DefaultConfigFile,
-		Destination: &ConfigFile,
-	},
-	&cli.StringFlag{
-		Name:        "env",
-		Usage:       fmt.Sprintf("environment to use (default: %s)", DefaultConfigEnvironment),
-		Required:    false,
-		Value:       DefaultConfigEnvironment,
-		Destination: &ConfigEnvironment,
-	},
-	&cli.BoolFlag{
-		Name:        "ignore",
-		Usage:       "ignore already exists and does not exist errors in migrations",
-		Required:    false,
-		Value:       false,
-		Destination: &IgnoreExistErrors,
-		Aliases:     []string{"i"},
-	},
-}
-
+// GetConnection creates a Cassandra session using password authentication.
 func GetConnection(hosts []string, port int, keyspace, username, password string) (*gocql.Session, error) {
 	if username == DefaultConfigUsername && password == DefaultConfigPassword {
 		println("warning, using default credentials")
@@ -50,6 +25,7 @@ func GetConnection(hosts []string, port int, keyspace, username, password string
 	return cluster.CreateSession()
 }
 
+// IsExistError reports whether the given error is a Cassandra "already exists" error.
 func IsExistError(err error) bool {
 	if reflect.TypeOf(err).String() == "gocql.errorFrame" {
 		code := reflect.ValueOf(err).FieldByName("code").Int()
@@ -59,13 +35,23 @@ func IsExistError(err error) bool {
 	return errors.As(err, &cqlErr)
 }
 
+// Migration represents one applied migration row from the tracking table.
 type Migration struct {
 	ID        string
 	AppliedAt time.Time
 }
 
+// IsNewerMigration orders applied migrations by timestamp descending, then ID descending.
+func IsNewerMigration(left, right Migration) bool {
+	if left.AppliedAt.Equal(right.AppliedAt) {
+		return left.ID > right.ID
+	}
+	return left.AppliedAt.After(right.AppliedAt)
+}
+
+// GetExistingMigrations returns all applied migrations for a keyspace.
 func GetExistingMigrations(keyspace string, session *gocql.Session) ([]Migration, error) {
-	query := fmt.Sprintf(`SELECT id, applied_at FROM migrations."%s_migrations";`, keyspace)
+	query := fmt.Sprintf(`SELECT id, applied_at FROM "%s_migrations";`, keyspace)
 	appliedMigrations := make([]Migration, 0)
 	iter := session.Query(query).Iter()
 	for {
@@ -81,19 +67,3 @@ func GetExistingMigrations(keyspace string, session *gocql.Session) ([]Migration
 
 	return appliedMigrations, nil
 }
-
-func ReplaceVarsInStatement(statement string, conf Config) string {
-	newStatement := statement
-	replicationStrategy := conf.Replication.Strategy
-	if !strings.HasPrefix(replicationStrategy, "'") && !strings.HasSuffix(replicationStrategy, "'") {
-		replicationStrategy = fmt.Sprintf("'%s'", replicationStrategy)
-	}
-	newStatement = strings.ReplaceAll(newStatement, replicationStrategyVar, replicationStrategy)
-	newStatement = strings.ReplaceAll(newStatement, replicationFactorVar, fmt.Sprintf("%s", conf.Replication.Factor))
-	return newStatement
-}
-
-const (
-	replicationStrategyVar = "${ReplicationStrategy}"
-	replicationFactorVar   = "${ReplicationFactor}"
-)
