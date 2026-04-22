@@ -3,10 +3,9 @@ package migrate
 import (
 	"errors"
 	"fmt"
-	"reflect"
 	"time"
 
-	"github.com/gocql/gocql"
+	gocql "github.com/apache/cassandra-gocql-driver/v2"
 )
 
 // GetConnection creates a Cassandra session using password authentication.
@@ -17,6 +16,7 @@ func GetConnection(hosts []string, port int, keyspace, username, password string
 	cluster := gocql.NewCluster(hosts...)
 	cluster.Port = port
 	cluster.Keyspace = keyspace
+	cluster.ProtoVersion = 5
 	cluster.Authenticator = gocql.PasswordAuthenticator{
 		Username: username,
 		Password: password,
@@ -27,12 +27,8 @@ func GetConnection(hosts []string, port int, keyspace, username, password string
 
 // IsExistError reports whether the given error is a Cassandra "already exists" error.
 func IsExistError(err error) bool {
-	if reflect.TypeOf(err).String() == "gocql.errorFrame" {
-		code := reflect.ValueOf(err).FieldByName("code").Int()
-		return code == 0x2400
-	}
-	var cqlErr *gocql.RequestErrAlreadyExists
-	return errors.As(err, &cqlErr)
+	var requestErr gocql.RequestError
+	return errors.As(err, &requestErr) && requestErr.Code() == gocql.ErrCodeAlreadyExists
 }
 
 // Migration represents one applied migration row from the tracking table.
