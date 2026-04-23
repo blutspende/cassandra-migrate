@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	gocql "github.com/apache/cassandra-gocql-driver/v2"
 	"github.com/blutspende/cassandra-migrate/sqlparse"
-	"github.com/gocql/gocql"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -71,29 +71,20 @@ func ApplyUp(conf Config) (UpResult, error) {
 		if err != nil {
 			return UpResult{}, err
 		}
-		for _, statement := range migration.UpStatements {
-			err := session.Query(statement).Exec()
-			if err != nil {
-				if conf.IgnoreExistErrors && IsExistError(err) {
-					continue
-				}
-				execErr = fmt.Errorf("failed to execute statement in %s: %w", filepath.Base(file), err)
-				break
-			}
-		}
-		if execErr != nil {
+		err = applyAndRecordMigration(
+			conf.Keyspace,
+			file,
+			migration.UpStatements,
+			conf.IgnoreExistErrors,
+			func(statement string, args ...any) error {
+				return session.Query(statement, args...).Exec()
+			},
+		)
+		if err != nil {
+			execErr = err
 			break
 		}
 		appliedMigrationIDs = append(appliedMigrationIDs, filepath.Base(file))
-	}
-	if len(appliedMigrationIDs) > 0 {
-		batch := session.NewBatch(gocql.LoggedBatch)
-		for _, id := range appliedMigrationIDs {
-			batch.Query(fmt.Sprintf(insertMigrationQueryTemplate, conf.Keyspace), id)
-		}
-		if err := session.ExecuteBatch(batch); err != nil {
-			return UpResult{}, err
-		}
 	}
 
 	result := UpResult{
@@ -108,6 +99,27 @@ const (
 	createMigrationsTableQueryTemplate = `CREATE TABLE IF NOT EXISTS "%s_migrations" (id TEXT, applied_at TIMESTAMP, PRIMARY KEY(id));`
 	insertMigrationQueryTemplate       = `INSERT INTO "%s_migrations" (id, applied_at) VALUES (?, toTimestamp(now()));`
 )
+
+type queryExecutor func(statement string, args ...any) error
+
+func applyAndRecordMigration(keyspace, file string, statements []string, ignoreExistErrors bool, execQuery queryExecutor) error {
+	migrationID := filepath.Base(file)
+	for _, statement := range statements {
+		err := execQuery(statement)
+		if err != nil {
+			if ignoreExistErrors && IsExistError(err) {
+				continue
+			}
+			return fmt.Errorf("failed to execute statement in %s: %w", migrationID, err)
+		}
+	}
+
+	if err := execQuery(fmt.Sprintf(insertMigrationQueryTemplate, keyspace), migrationID); err != nil {
+		return fmt.Errorf("failed to record migration %s: %w", migrationID, err)
+	}
+
+	return nil
+}
 
 // GetExistingMigrationIDs returns applied migration IDs as a set.
 func GetExistingMigrationIDs(keyspace string, session *gocql.Session) (map[string]any, error) {
